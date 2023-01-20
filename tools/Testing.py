@@ -126,17 +126,17 @@ def compute_author_predictions_nli_LR(trainLoad, testLoad, trainPred, testPred, 
     LR = LogisticRegression()
     
     N = len(trainPred)
-    X = trainPred.reshape( (N//2, 6) )
+    X = trainPred.reshape( (N//num_labels, 3*num_labels) )
     
     y = np.array([ instance[task] for instance in trainLoad.data])
-    y = y.reshape(N//2, 2)[:,0]
+    y = y.reshape(N//num_labels, num_labels)[:,0]
     
     LR.fit(X,y)
     
     # Compute New Predictions
     
     N = len(testPred)
-    X_test = testPred.reshape( (N//2, 6) )
+    X_test = testPred.reshape( (N//num_labels, 3*num_labels) )
     predictions = LR.predict_proba(X_test)
     
     
@@ -170,7 +170,7 @@ def compute_author_predictions_nli_LR(trainLoad, testLoad, trainPred, testPred, 
         for i in range(0, len(author_idx), num_labels):
             
             # get prediction and accumulate
-            pred = predictions[author_idx[i] // 2]
+            pred = predictions[author_idx[i] // num_labels]
             
             # soft vote
             y = np.exp(pred)/np.sum(np.exp(pred))

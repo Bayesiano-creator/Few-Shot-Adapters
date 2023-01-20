@@ -7,78 +7,63 @@ import torch
 from torch.utils.data import Dataset
 
 
-class BasePAN17():
+class BasePAN():
     
-    def __init__(self, Dir, split, language, tokenizer, gender_dict, variety_dict, tweet_batch_size, max_seq_len, preprocess_text):
-        self.Dir          = Dir
-        self.split        = split
-        self.language     = language
-        self.tokenizer    = tokenizer
-        self.gender_dict  = gender_dict
-        self.variety_dict = variety_dict
-        self.tw_bsz       = tweet_batch_size
+    def __init__(self, Dir, split, language, label_idx, class_dict, label_name):
+        """
+            Dir        (str) : the name of the directory where dataset is stored
+            split      (str) : the name of split to use, train or test
+            language   (str) : language to use
+            label_idx  (int) : number of label to work on
+            class_dict (dict): name of class to integer id of class
+            label_name (str) : name of label
+        """
         
-        print("\nReading data...")
+        # save parameters -------------------------------------------------
+        
+        self.Dir         = Dir
+        self.split       = split
+        self.language    = language
+        self.label_idx   = label_idx
+        self.class_dict  = class_dict
+        self.label_name  = label_name
+        self.num_classes = len(class_dict)
+        
+        
+        # get author ids and labels ---------------------------------------
         
         self.authors   = self.get_authors(Dir, split, language)
         self.author_lb = self.get_author_labels(Dir, split, language)
+        
+        
+        # create dictionary author2idx -----------------------------------
         
         self.author_ids = {}
         for i in range(len(self.authors)):
             self.author_ids[ self.authors[i] ] = i
         
         
-        # Save authors splited by gender ----------------------------------
-        
-        # create empty dictionary of authors per label
+        # Save authors splited by classes ---------------------------------
         
         self.splited_authors = {}
-        for i in gender_dict.values():
+        for i in self.class_dict.values():
             self.splited_authors[ i ] = []
         
-        # fill dictionary 
-        
         for author in self.authors:
-            gl = self.author_lb[author]['gender']
-            self.splited_authors[ gl ].append(author)
+            lb = self.author_lb[ author ]
+            self.splited_authors[ lb ].append( author )
             
-        # shuffle authors
         
-        for i in gender_dict.values():
+        # shuffle authors -------------------------------------------------
+        
+        for i in self.class_dict.values():
             shuffle(self.splited_authors[i])
         
-        #----------------------------------------------------------------
         
-        self.data = self.get_tweets_in_batches(Dir, split, language)
-        
-        shuffle(self.data)
-        
-        if preprocess_text:
-            print("    Done\nPreprocessing text...")
-            
-            if self.language == 'es':
-                preprocessed   = [preprocess_tweet(instance['text']) for instance in self.data]
-            elif self.language == 'en':
-                preprocessed   = [normalizeTweet(instance['text'])   for instance in self.data]
-            
-        else:
-            preprocessed   = [instance['text'] for instance in self.data]
-        
-        print("    Done\nTokenizing...")
-        
-        self.encodings = self.tokenizer(preprocessed, max_length = max_seq_len, 
-                                                      truncation = True, 
-                                                      padding    = True,
-                                                      return_tensors = 'pt')
-         
-        print("    Done\nMerging data...")
-        
-        for i in range(len(self.data)):
-            self.data[i].update( {key: self.encodings[key][i] for key in self.encodings.keys()} )
-        
-        print("    Done\n\nTotal Instances: " + str(len(self.data)) + '\n')
+        #------------------------------------------------------------------
 
-        
+    
+    
     def get_authors(self, Dir, split, language):
         path    = os.path.join(Dir, split, language)
         files   = os.listdir(path)
@@ -87,28 +72,30 @@ class BasePAN17():
         return authors
     
     
+    
     def get_author_labels(self, Dir, split, language):
         lb_file_name = os.path.join(Dir, split, language + '.txt')
         lb_file      = open(lb_file_name, "r")
         author_lb    = dict()
 
         for line in lb_file:
-            author, gender, variety = line.split(':::')
-            variety = variety[:-1]                       
+            attributes     = list( line.split(':::') )
+            if attributes[-1][-1] == '\n':
+                attributes[-1] = attributes[-1][:-1]
+            
+            author = attributes[0]
+            lb     = attributes[ self.label_idx ]
 
-            gl = self.gender_dict[gender]
-            vl = self.variety_dict[variety]
-
-            author_lb[author] = {'gender': gl, 'variety': vl}
+            author_lb[author] = self.class_dict[lb]
 
         lb_file.close()
         
         return author_lb
-     
-        
-    def get_tweets_in_batches(self, Dir, split, language):
+    
+    
+    def get_tweets_in_batches(self, Dir, split, language, tweet_bsz):
         data   = []
-
+        
         for author in self.authors:
             tw_file_name = os.path.join(Dir, split, language, author + '.xml')
             tree         = ET.parse(tw_file_name)
@@ -116,47 +103,155 @@ class BasePAN17():
             documents    = root[0]
             total_tweets = len(documents)
 
-            for i in range(0, total_tweets, self.tw_bsz):
-                doc_batch = documents[i : i + self.tw_bsz]
+            for i in range(0, total_tweets, tweet_bsz):
+                doc_batch = documents[i : i + tweet_bsz]
                 tweets    = ''
 
                 for document in doc_batch:
                     tweets += document.text + '\n'
 
-                data.append( {'author': author, 'text': tweets, **self.author_lb[author]} )
+                data.append( {'author': author, 'text': tweets, self.label_name: self.author_lb[author]} )
+        
+        shuffle(data)
         
         return data
     
     
-    def cross_val(self, k, val_idx, num_authors):
+    
+    def get_tweets_in_batches_NLI(self, Dir, split, language, tweet_bsz, label_hyp, nli_label2id):
+        data   = []
+        data_tuples = []
+        
+        for author in self.authors:
+            tw_file_name = os.path.join(Dir, split, language, author + '.xml')
+            tree         = ET.parse(tw_file_name)
+            root         = tree.getroot()
+            documents    = root[0]
+            total_tweets = len(documents)
+
+            for i in range(0, total_tweets, tweet_bsz):
+                doc_batch = documents[i : i + tweet_bsz]
+                tweets    = ''
+
+                for document in doc_batch:
+                    tweets += document.text + ' '
+                
+                instance = []
+                for lb in label_hyp.keys():
+                    if lb == self.author_lb[author]:
+                        relation = 'entailment'
+                    else:
+                        relation = 'contradiction'
+                    
+                    instance.append( {'author': author, 
+                                      'text': tweets, 
+                                      self.label_name: self.author_lb[author],
+                                      'hypothesis': label_hyp[lb], 
+                                      'nli_label': nli_label2id[relation] })
+                        
+                instance = tuple(instance)
+                data_tuples.append(instance)
+            
+        shuffle(data_tuples)
+        for instance in data_tuples:
+            data += list(instance)
+                               
+        return data
+    
+    
+    
+    def get_all_data(self, tweet_bsz, tokenizer, max_seq_len, preprocess_text, NLI=False, label_hyp=None, nli_label2id=None):
+        print("\nReading data...")
+        
+        if NLI:
+            self.data = self.get_tweets_in_batches_NLI(self.Dir, self.split, self.language, tweet_bsz, label_hyp, nli_label2id)
+        else:
+            self.data = self.get_tweets_in_batches(self.Dir, self.split, self.language, tweet_bsz)
+        
+        
+        # -----------------------------------------------------------------------------
+        if NLI:
+            if preprocess_text:
+                print("    Done\nPreprocessing text...")
+                preprocessed_pre   = [normalizeTweet(instance['text'])   for instance in self.data]
+                preprocessed_hyp   = [normalizeTweet(instance['hypothesis'])   for instance in self.data]
+
+            else:
+                preprocessed_pre   = [instance['text'] for instance in self.data]
+                preprocessed_hyp   = [instance['hypothesis'] for instance in self.data]
+            
+            print("    Done\nTokenizing...")
+        
+            self.encodings = tokenizer(preprocessed_pre, preprocessed_hyp, max_length = max_seq_len, 
+                                                                            truncation = True, 
+                                                                            padding    = True,
+                                                                            return_tensors = 'pt')
+        
+        # -----------------------------------------------------------------------------
+        else:
+            if preprocess_text:
+                print("    Done\nPreprocessing text...")
+
+                if self.language == 'es':
+                    preprocessed   = [preprocess_tweet(instance['text']) for instance in self.data]
+                elif self.language == 'en':
+                    preprocessed   = [normalizeTweet(instance['text'])   for instance in self.data]
+
+            else:
+                preprocessed   = [instance['text'] for instance in self.data]
+
+            print("    Done\nTokenizing...")
+
+            self.encodings = tokenizer(preprocessed, max_length = max_seq_len, truncation = True, padding = True, return_tensors = 'pt')
+        
+        # ----------------------------------------------------------------------------- 
+        print("    Done\nMerging data...")
+        
+        for i in range(len(self.data)):
+            self.data[i].update( {key: self.encodings[key][i] for key in self.encodings.keys()} )
+        
+        print("    Done\n\nTotal Instances: " + str(len(self.data)) + '\n')
+        
+    
+    
+    def cross_val(self, k, num_authors):
         
         if k > 1:
-            sz     = int(len(self.authors) / len(self.gender_dict))
-            val_sz = int(sz / k)
+            sz     = len(self.authors) // self.num_classes
+            val_sz = sz // k
         if k == 1:
-            sz     = int(len(self.authors) / len(self.gender_dict))
+            sz     = len(self.authors) // self.num_classes
             val_sz = 0
         
-        splited_train = {}
-        splited_val   = {}
+        splits = []
         
-        for i in self.gender_dict.values():
-            splited_train[i] = self.splited_authors[i][0:( val_sz*val_idx )] + self.splited_authors[i][( val_sz*(val_idx+1) ):sz]
-            splited_val[i]   = self.splited_authors[i][( val_sz*val_idx ):( val_sz*(val_idx+1) )]
+        for val_idx in range(k):
+            
+            splited_train = {}
+            splited_val   = {}
         
-        authors_train = []
-        authors_val   = []
-        
-        for i in self.gender_dict.values():
-            authors_train += sample(splited_train[i], num_authors)
-            authors_val   += splited_val[i]
-        
-        
-        return authors_train, authors_val
-    
-    
+            for i in self.class_dict.values():
+                splited_train[i] = self.splited_authors[i][0:( val_sz*val_idx )] + self.splited_authors[i][( val_sz*(val_idx+1) ):sz]
+                splited_val[i]   = self.splited_authors[i][( val_sz*val_idx ):( val_sz*(val_idx+1) )]
 
-class DatasetPAN17(Dataset):
+            authors_train = []
+            authors_val   = []
+
+            for i in self.class_dict.values():
+                authors_train += sample(splited_train[i], num_authors)
+                authors_val   += splited_val[i]
+
+            splits.append( (authors_train, authors_val) )
+        
+        return splits
+
+    
+# ---------------------------------------------------------------------------------------------------------
+# NORMAL --------------------------------------------------------------------------------------------------
+# ---------------------------------------------------------------------------------------------------------
+
+
+class DatasetPAN(Dataset):
     
     def __init__(self, Base_Dataset, label):
         self.Base_Dataset = Base_Dataset
@@ -199,187 +294,12 @@ class DatasetCrossVal(Dataset):
     
     
 # ---------------------------------------------------------------------------------------------------------
-# NLI------------------------------------------------------------------------------------------------------
+# NLI -----------------------------------------------------------------------------------------------------
 # ---------------------------------------------------------------------------------------------------------
 
 
 
-class BasePAN17nli():
-    
-    def __init__(self, Dir, split, language, tokenizer, gender_dict, variety_dict, tweet_batch_size, max_seq_len, preprocess_text, label, label_hip, nli_label2id):
-        self.Dir          = Dir
-        self.split        = split
-        self.language     = language
-        self.tokenizer    = tokenizer
-        self.tw_bsz       = tweet_batch_size
-        self.gender_dict  = gender_dict
-        self.variety_dict = variety_dict
-        
-        # NLI
-        self.label        = label
-        self.label_hip    = label_hip
-        self.nli_label2id = nli_label2id
-        
-        
-        print("\nReading data...")
-        
-        self.authors   = self.get_authors(Dir, split, language)
-        self.author_lb = self.get_author_labels(Dir, split, language)
-        
-        self.author_ids = {}
-        for i in range(len(self.authors)):
-            self.author_ids[ self.authors[i] ] = i
-        
-        
-        # Save authors splited by gender ----------------------------------
-        
-        # create empty dictionary of authors per label
-        
-        self.splited_authors = {}
-        for i in gender_dict.values():
-            self.splited_authors[ i ] = []
-        
-        # fill dictionary 
-        
-        for author in self.authors:
-            gl = self.author_lb[author]['gender']
-            self.splited_authors[ gl ].append(author)
-            
-        # shuffle authors
-        
-        for i in gender_dict.values():
-            shuffle(self.splited_authors[i])
-        
-        #----------------------------------------------------------------
-        
-        self.data = self.get_tweets_in_batches(Dir, split, language)
-        
-        if preprocess_text:
-            print("    Done\nPreprocessing text...")
-
-            if self.language == 'es':
-                preprocessed_pre   = [normalizeTweet(instance['text']) for instance in self.data]
-                preprocessed_hyp   = [normalizeTweet(instance['hypothesis']) for instance in self.data]
-            elif self.language == 'en':
-                preprocessed_pre   = [normalizeTweet(instance['text'])   for instance in self.data]
-                preprocessed_hyp   = [normalizeTweet(instance['hypothesis'])   for instance in self.data]
-            
-        else:
-            preprocessed_pre   = [instance['text'] for instance in self.data]
-            preprocessed_hyp   = [instance['hypothesis'] for instance in self.data]
-        
-        print("    Done\nTokenizing...")
-        
-        self.encodings = self.tokenizer(preprocessed_pre, preprocessed_hyp, max_length = max_seq_len, 
-                                                                            truncation = True, 
-                                                                            padding    = True,
-                                                                            return_tensors = 'pt')
-         
-        print("    Done\nMerging data...")
-        
-        for i in range(len(self.data)):
-            self.data[i].update( {key: self.encodings[key][i] for key in self.encodings.keys()} )
-        
-        print("    Done\n\nTotal Instances: " + str(len(self.data)) + '\n')
-
-        
-    def get_authors(self, Dir, split, language):
-        path    = os.path.join(Dir, split, language)
-        files   = os.listdir(path)
-        authors = [ file[0:-4] for file in files ] 
-        
-        return authors
-    
-    
-    def get_author_labels(self, Dir, split, language):
-        lb_file_name = os.path.join(Dir, split, language + '.txt')
-        lb_file      = open(lb_file_name, "r")
-        author_lb    = dict()
-
-        for line in lb_file:
-            author, gender, variety = line.split(':::')
-            variety = variety[:-1]                       
-
-            gl = self.gender_dict[gender]
-            vl = self.variety_dict[variety]
-
-            author_lb[author] = {'gender': gl, 'variety': vl}
-
-        lb_file.close()
-        
-        return author_lb
-     
-        
-    def get_tweets_in_batches(self, Dir, split, language):
-        data   = []
-        data_tuples = []
-        
-        for author in self.authors:
-            tw_file_name = os.path.join(Dir, split, language, author + '.xml')
-            tree         = ET.parse(tw_file_name)
-            root         = tree.getroot()
-            documents    = root[0]
-            total_tweets = len(documents)
-
-            for i in range(0, total_tweets, self.tw_bsz):
-                doc_batch = documents[i : i + self.tw_bsz]
-                tweets    = ''
-
-                for document in doc_batch:
-                    tweets += document.text + ' '
-                
-                instance = []
-                for lb in self.label_hip.keys():
-                    if lb == self.author_lb[author][self.label]:
-                        relation = 'entailment'
-                    else:
-                        relation = 'contradiction'
-                    
-                    instance.append( {'author': author, 
-                                      'text': tweets, 
-                                      'hypothesis': self.label_hip[lb], 
-                                      'nli_label': self.nli_label2id[relation],  
-                                      **self.author_lb[author]} )
-                        
-                instance = tuple(instance)
-                data_tuples.append(instance)
-            
-        shuffle(data_tuples)
-        for instance in data_tuples:
-            data += list(instance)
-                               
-        return data
-    
-    
-    def cross_val(self, k, val_idx, num_authors):
-        
-        if k > 1:
-            sz     = int(len(self.authors) / len(self.gender_dict))
-            val_sz = int(sz / k)
-        if k == 1:
-            sz     = int(len(self.authors) / len(self.gender_dict))
-            val_sz = 0
-        
-        splited_train = {}
-        splited_val   = {}
-        
-        for i in self.gender_dict.values():
-            splited_train[i] = self.splited_authors[i][0:( val_sz*val_idx )] + self.splited_authors[i][( val_sz*(val_idx+1) ):sz]
-            splited_val[i]   = self.splited_authors[i][( val_sz*val_idx ):( val_sz*(val_idx+1) )]
-        
-        authors_train = []
-        authors_val   = []
-        
-        for i in self.gender_dict.values():
-            authors_train += sample(splited_train[i], num_authors)
-            authors_val   += splited_val[i]
-        
-        
-        return authors_train, authors_val
-    
-    
-
-class DatasetPAN17nli(Dataset):
+class DatasetPANnli(Dataset):
     
     def __init__(self, Base_Dataset):
         self.Base_Dataset = Base_Dataset
