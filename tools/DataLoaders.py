@@ -100,7 +100,7 @@ class BasePAN():
             tw_file_name = os.path.join(Dir, split, language, author + '.xml')
             tree         = ET.parse(tw_file_name)
             root         = tree.getroot()
-            documents    = root[0]
+            documents    = root[0] if root[0].tag == 'documents' else root
             total_tweets = len(documents)
 
             for i in range(0, total_tweets, tweet_bsz):
@@ -126,7 +126,7 @@ class BasePAN():
             tw_file_name = os.path.join(Dir, split, language, author + '.xml')
             tree         = ET.parse(tw_file_name)
             root         = tree.getroot()
-            documents    = root[0]
+            documents    = root[0] if root[0].tag == 'documents' else root
             total_tweets = len(documents)
 
             for i in range(0, total_tweets, tweet_bsz):
@@ -231,6 +231,9 @@ class BasePAN():
             splited_val   = {}
         
             for i in self.class_dict.values():
+                sz     = len(self.splited_authors[i])
+                val_sz = sz // k
+                
                 splited_train[i] = self.splited_authors[i][0:( val_sz*val_idx )] + self.splited_authors[i][( val_sz*(val_idx+1) ):sz]
                 splited_val[i]   = self.splited_authors[i][( val_sz*val_idx ):( val_sz*(val_idx+1) )]
 
@@ -238,7 +241,7 @@ class BasePAN():
             authors_val   = []
 
             for i in self.class_dict.values():
-                authors_train += sample(splited_train[i], num_authors)
+                authors_train += sample(splited_train[i], min(num_authors, len(splited_train[i]) ))
                 authors_val   += splited_val[i]
 
             splits.append( (authors_train, authors_val) )

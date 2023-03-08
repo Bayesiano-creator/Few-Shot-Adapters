@@ -1,0 +1,21 @@
+{
+  "config": {
+    "activation_function": "tanh",
+    "bias": true,
+    "head_type": "classification",
+    "label2id": {
+      "contradiction": 2,
+      "entailment": 0,
+      "neutral": 1
+    },
+    "layers": 2,
+    "num_labels": 3,
+    "use_pooler": false
+  },
+  "hidden_size": 1024,
+  "model_class": "BartAdapterModel",
+  "model_name": "ynie/bart-large-snli_mnli_fever_anli_R1_R2_R3-nli",
+  "model_type": "bart",
+  "name": "gender",
+  "version": "3.1.0"
+}

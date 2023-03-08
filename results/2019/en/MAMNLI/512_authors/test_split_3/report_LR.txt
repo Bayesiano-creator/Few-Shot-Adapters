@@ -1,0 +1,20 @@
+soft voting:
+              precision    recall  f1-score   support
+
+           0     0.8979    0.9727    0.9338      1320
+           1     0.9702    0.8894    0.9281      1320
+
+    accuracy                         0.9311      2640
+   macro avg     0.9341    0.9311    0.9309      2640
+weighted avg     0.9341    0.9311    0.9309      2640
+
+
+hard voting:
+              precision    recall  f1-score   support
+
+           0     0.8926    0.9758    0.9323      1320
+           1     0.9733    0.8826    0.9257      1320
+
+    accuracy                         0.9292      2640
+   macro avg     0.9329    0.9292    0.9290      2640
+weighted avg     0.9329    0.9292    0.9290      2640
